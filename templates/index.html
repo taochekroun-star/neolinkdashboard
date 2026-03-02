@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeoLink Dashboard</title>
+  <style>
+    /* ─── Variables & Reset ─────────────────────────────── */
+    :root {
+      --bg:          #0d0d0d;
+      --surface:     #161616;
+      --surface2:    #1f1f1f;
+      --border:      #2a2a2a;
+      --text:        #e8e8e8;
+      --text-muted:  #777;
+      --red:         #ef4444;
+      --red-dim:     rgba(239,68,68,0.12);
+      --yellow:      #f59e0b;
+      --yellow-dim:  rgba(245,158,11,0.12);
+      --green:       #22c55e;
+      --green-dim:   rgba(34,197,94,0.12);
+      --accent:      #6366f1;
+      --accent-dim:  rgba(99,102,241,0.15);
+      --radius:      8px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    /* ─── Header ────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .header-left span {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: block;
+      margin-top: 1px;
+    }
+    .stats {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .stat-item strong { color: var(--text); }
+
+    /* ─── Main Layout ───────────────────────────────────── */
+    main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 24px 16px 100px;
+    }
+
+    /* ─── Section priorité ──────────────────────────────── */
+    .section { margin-bottom: 32px; }
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .section-count {
+      font-size: 12px;
+      background: var(--surface2);
+      padding: 2px 8px;
+      border-radius: 20px;
+      color: var(--text-muted);
+    }
+    .section-bloquant   .section-title { color: var(--red); }
+    .section-semaine    .section-title { color: var(--yellow); }
+    .section-backlog    .section-title { color: var(--green); }
+    .section-bloquant   .section-header { border-color: var(--red-dim); }
+    .section-semaine    .section-header { border-color: var(--yellow-dim); }
+    .section-backlog    .section-header { border-color: var(--green-dim); }
+
+    /* ─── Carte tâche ───────────────────────────────────── */
+    .task-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      transition: border-color 0.15s, background 0.15s;
+      cursor: default;
+    }
+    .task-card:hover { border-color: #3a3a3a; background: #1a1a1a; }
+    .task-card.done {
+      opacity: 0.45;
+      background: var(--surface);
+    }
+    .task-card.done .task-title { text-decoration: line-through; color: var(--text-muted); }
+
+    .task-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .task-checkbox {
+      width: 18px; height: 18px;
+      border: 2px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-top: 2px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.1s, border-color 0.1s;
+      background: transparent;
+    }
+    .task-checkbox:hover { border-color: var(--accent); }
+    .task-checkbox.checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .task-checkbox.checked::after {
+      content: "";
+      width: 10px; height: 6px;
+      border-left: 2px solid #fff;
+      border-bottom: 2px solid #fff;
+      transform: rotate(-45deg) translateY(-1px);
+    }
+    .task-body { flex: 1; min-width: 0; }
+    .task-title {
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.4;
+      margin-bottom: 4px;
+    }
+    .task-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+    }
+
+    /* ─── Détails (expand) ──────────────────────────────── */
+    .task-details {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .task-details.open { display: block; }
+    .detail-row { margin-bottom: 8px; }
+    .detail-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+    .detail-value { color: var(--text); line-height: 1.5; }
+
+    /* ─── Actions tâche ─────────────────────────────────── */
+    .task-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .btn-icon {
+      background: none;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 5px 7px;
+      border-radius: 5px;
+      font-size: 14px;
+      transition: color 0.1s, background 0.1s;
+      line-height: 1;
+    }
+    .btn-icon:hover { color: var(--text); background: var(--surface2); border-color: var(--border); }
+    .btn-icon.expand-btn:hover { color: var(--accent); }
+    .btn-icon.edit-btn:hover   { color: var(--yellow); }
+    .btn-icon.delete-btn:hover { color: var(--red); }
+
+    /* ─── Badge priorité ────────────────────────────────── */
+    .priority-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 6px;
+    }
+    .dot-bloquant    { background: var(--red); }
+    .dot-cette_semaine { background: var(--yellow); }
+    .dot-backlog     { background: var(--green); }
+
+    /* ─── Zone vide ─────────────────────────────────────── */
+    .empty-section {
+      color: var(--text-muted);
+      font-size: 13px;
+      padding: 12px 0;
+      text-align: center;
+    }
+
+    /* ─── FAB — Bouton d'ajout ──────────────────────────── */
+    .fab {
+      position: fixed;
+      bottom: 28px; right: 24px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      padding: 14px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(99,102,241,0.4);
+      transition: transform 0.15s, box-shadow 0.15s;
+      z-index: 200;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .fab:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(99,102,241,0.55); }
+    .fab:active { transform: translateY(0); }
+
+    /* ─── Modal ─────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 300;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 520px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.15s;
+      outline: none;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus { border-color: var(--accent); }
+    .form-group textarea { resize: vertical; min-height: 72px; }
+    .form-group select { cursor: pointer; }
+    .form-group select option { background: var(--surface2); }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .btn-cancel {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 9px 18px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .btn-cancel:hover { color: var(--text); border-color: #3a3a3a; }
+    .btn-save {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      padding: 9px 22px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.1s;
+    }
+    .btn-save:hover { opacity: 0.88; }
+
+    /* ─── Toast notification ────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 90px; right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 16px;
+      font-size: 13px;
+      z-index: 400;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      max-width: 280px;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ─── Responsive ────────────────────────────────────── */
+    @media (max-width: 600px) {
+      header { padding: 12px 16px; }
+      .stats { gap: 10px; }
+      main { padding: 16px 12px 90px; }
+      .fab { bottom: 20px; right: 16px; padding: 12px 18px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── Header ──────────────────────────────────────────── -->
+<header>
+  <div class="header-left">
+    <h1>⚡ NeoLink Dashboard</h1>
+    <span>NeoLinkStudio · Québec</span>
+  </div>
+  <div class="stats">
+    <div class="stat-item"><strong>{{ stats.todo }}</strong> à faire</div>
+    <div class="stat-item"><strong>{{ stats.done }}</strong> faites</div>
+  </div>
+</header>
+
+<!-- ─── Macro tâche (doit être définie avant utilisation) ─── -->
+{% macro render_task(task) %}
+<div class="task-card {% if task.status == 'done' %}done{% endif %}"
+     id="task-{{ task.id }}"
+     data-id="{{ task.id }}"
+     data-title="{{ task.title | e }}"
+     data-description="{{ task.description | e }}"
+     data-comment-faire="{{ task.comment_faire | e }}"
+     data-done-criteria="{{ task.done_criteria | e }}"
+     data-priority="{{ task.priority }}">
+
+  <div class="task-top">
+    <!-- Checkbox -->
+    <div class="task-checkbox {% if task.status == 'done' %}checked{% endif %}"
+         onclick="toggleTask({{ task.id }})"
+         title="Marquer comme {% if task.status == 'done' %}à faire{% else %}faite{% endif %}">
+    </div>
+
+    <!-- Contenu -->
+    <div class="task-body">
+      <div class="task-title">{{ task.title }}</div>
+      {% if task.description %}
+        <div class="task-desc">{{ task.description }}</div>
+      {% endif %}
+    </div>
+
+    <!-- Actions -->
+    <div class="task-actions">
+      {% if task.comment_faire or task.done_criteria %}
+      <button class="btn-icon expand-btn"
+              onclick="toggleDetails({{ task.id }})"
+              title="Voir les détails">▾</button>
+      {% endif %}
+      <button class="btn-icon edit-btn"
+              onclick="openEditModal({{ task.id }})"
+              title="Modifier">✏️</button>
+      <button class="btn-icon delete-btn"
+              onclick="deleteTask({{ task.id }}, '{{ task.title | e }}')"
+              title="Supprimer">🗑</button>
+    </div>
+  </div>
+
+  <!-- Détails dépliables -->
+  {% if task.comment_faire or task.done_criteria %}
+  <div class="task-details" id="details-{{ task.id }}">
+    {% if task.comment_faire %}
+    <div class="detail-row">
+      <div class="detail-label">Comment faire</div>
+      <div class="detail-value">{{ task.comment_faire }}</div>
+    </div>
+    {% endif %}
+    {% if task.done_criteria %}
+    <div class="detail-row">
+      <div class="detail-label">Critère de complétion</div>
+      <div class="detail-value">{{ task.done_criteria }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+{% endmacro %}
+
+<!-- ─── Contenu principal ────────────────────────────────── -->
+<main>
+
+  <!-- Section Bloquant -->
+  <div class="section section-bloquant">
+    <div class="section-header">
+      <span class="section-title">🔴 Bloquant</span>
+      <span class="section-count">{{ grouped.bloquant | length }}</span>
+    </div>
+    {% if grouped.bloquant %}
+      {% for task in grouped.bloquant %}
+        {{ render_task(task) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-section">Aucune tâche bloquante</div>
+    {% endif %}
+  </div>
+
+  <!-- Section Cette semaine -->
+  <div class="section section-semaine">
+    <div class="section-header">
+      <span class="section-title">🟡 Cette semaine</span>
+      <span class="section-count">{{ grouped.cette_semaine | length }}</span>
+    </div>
+    {% if grouped.cette_semaine %}
+      {% for task in grouped.cette_semaine %}
+        {{ render_task(task) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-section">Aucune tâche pour cette semaine</div>
+    {% endif %}
+  </div>
+
+  <!-- Section Backlog -->
+  <div class="section section-backlog">
+    <div class="section-header">
+      <span class="section-title">🟢 Backlog</span>
+      <span class="section-count">{{ grouped.backlog | length }}</span>
+    </div>
+    {% if grouped.backlog %}
+      {% for task in grouped.backlog %}
+        {{ render_task(task) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-section">Backlog vide</div>
+    {% endif %}
+  </div>
+
+</main>
+
+<!-- ─── FAB Bouton ajouter ────────────────────────────────── -->
+<button class="fab" onclick="openAddModal()">
+  <span>+</span> Ajouter une tâche
+</button>
+
+<!-- ─── Modal Ajouter / Modifier ─────────────────────────── -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModalOnOverlay(event)">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Nouvelle tâche</div>
+    <input type="hidden" id="modal-task-id" value="" />
+
+    <div class="form-group">
+      <label for="f-title">Titre *</label>
+      <input type="text" id="f-title" placeholder="Ex: Créer la démo HVAC pour Climatech" maxlength="120" />
+    </div>
+
+    <div class="form-group">
+      <label for="f-description">Description</label>
+      <textarea id="f-description" placeholder="Ce qu'il faut faire et pourquoi c'est important..."></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="f-comment-faire">Comment faire</label>
+      <textarea id="f-comment-faire" placeholder="Étapes concrètes pour accomplir la tâche..."></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="f-done-criteria">Critère de complétion</label>
+      <input type="text" id="f-done-criteria" placeholder="Comment savoir que c'est vraiment terminé?" />
+    </div>
+
+    <div class="form-group">
+      <label for="f-priority">Priorité</label>
+      <select id="f-priority">
+        <option value="bloquant">🔴 Bloquant</option>
+        <option value="cette_semaine">🟡 Cette semaine</option>
+        <option value="backlog" selected>🟢 Backlog</option>
+      </select>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Annuler</button>
+      <button class="btn-save" onclick="saveTask()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Toast ─────────────────────────────────────────────── -->
+<div class="toast" id="toast"></div>
+
+<!-- ─── JavaScript ────────────────────────────────────────── -->
+<script>
+  /* ── Utilitaires ────────────────────────────────────────── */
+  function showToast(msg, duration = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.remove('show'), duration);
+  }
+
+  /* ── Toggle détails ─────────────────────────────────────── */
+  function toggleDetails(id) {
+    const details = document.getElementById('details-' + id);
+    if (!details) return;
+    details.classList.toggle('open');
+    const btn = document.querySelector('#task-' + id + ' .expand-btn');
+    if (btn) btn.textContent = details.classList.contains('open') ? '▴' : '▾';
+  }
+
+  /* ── Toggle statut tâche ────────────────────────────────── */
+  async function toggleTask(id) {
+    try {
+      const res = await fetch('/tasks/' + id + '/toggle', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur');
+
+      const card = document.getElementById('task-' + id);
+      const checkbox = card.querySelector('.task-checkbox');
+      const isDone = data.status === 'done';
+
+      card.classList.toggle('done', isDone);
+      checkbox.classList.toggle('checked', isDone);
+
+      // Mettre à jour le title de la checkbox
+      checkbox.title = isDone ? 'Marquer comme à faire' : 'Marquer comme faite';
+
+      showToast(isDone ? '✅ Tâche complétée !' : '↩️ Tâche remise à faire');
+
+      // Mettre à jour les stats sans recharger
+      updateStats();
+    } catch (e) {
+      showToast('❌ Erreur: ' + e.message);
+    }
+  }
+
+  /* ── Mise à jour des stats dans le header ───────────────── */
+  async function updateStats() {
+    try {
+      // Compter directement dans le DOM
+      const cards = document.querySelectorAll('.task-card');
+      let todo = 0, done = 0;
+      cards.forEach(c => c.classList.contains('done') ? done++ : todo++);
+      document.querySelectorAll('.stat-item')[0].innerHTML = '<strong>' + todo + '</strong> à faire';
+      document.querySelectorAll('.stat-item')[1].innerHTML = '<strong>' + done + '</strong> faites';
+
+      // Mettre à jour les compteurs de sections
+      ['bloquant', 'cette_semaine', 'backlog'].forEach(p => {
+        const section = document.querySelector('.section-' + (p === 'cette_semaine' ? 'semaine' : p === 'bloquant' ? 'bloquant' : 'backlog'));
+        if (!section) return;
+        const count = section.querySelectorAll('.task-card').length;
+        const badge = section.querySelector('.section-count');
+        if (badge) badge.textContent = count;
+      });
+    } catch(e) {}
+  }
+
+  /* ── Supprimer une tâche ────────────────────────────────── */
+  async function deleteTask(id, title) {
+    if (!confirm('Supprimer "' + title + '" ?')) return;
+    try {
+      const res = await fetch('/tasks/' + id, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Erreur serveur');
+      const card = document.getElementById('task-' + id);
+      card.style.transition = 'opacity 0.2s, transform 0.2s';
+      card.style.opacity = '0';
+      card.style.transform = 'translateX(10px)';
+      setTimeout(() => { card.remove(); updateStats(); }, 220);
+      showToast('🗑 Tâche supprimée');
+    } catch (e) {
+      showToast('❌ Impossible de supprimer');
+    }
+  }
+
+  /* ── Modal : ouvrir pour ajouter ────────────────────────── */
+  function openAddModal() {
+    document.getElementById('modal-title').textContent = 'Nouvelle tâche';
+    document.getElementById('modal-task-id').value = '';
+    document.getElementById('f-title').value = '';
+    document.getElementById('f-description').value = '';
+    document.getElementById('f-comment-faire').value = '';
+    document.getElementById('f-done-criteria').value = '';
+    document.getElementById('f-priority').value = 'backlog';
+    document.getElementById('modal-overlay').classList.add('open');
+    setTimeout(() => document.getElementById('f-title').focus(), 50);
+  }
+
+  /* ── Modal : ouvrir pour modifier ──────────────────────── */
+  function openEditModal(id) {
+    const card = document.getElementById('task-' + id);
+    document.getElementById('modal-title').textContent = 'Modifier la tâche';
+    document.getElementById('modal-task-id').value = id;
+    document.getElementById('f-title').value = card.dataset.title;
+    document.getElementById('f-description').value = card.dataset.description;
+    document.getElementById('f-comment-faire').value = card.dataset.commentFaire;
+    document.getElementById('f-done-criteria').value = card.dataset.doneCriteria;
+    document.getElementById('f-priority').value = card.dataset.priority;
+    document.getElementById('modal-overlay').classList.add('open');
+    setTimeout(() => document.getElementById('f-title').focus(), 50);
+  }
+
+  /* ── Modal : fermer ─────────────────────────────────────── */
+  function closeModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  function closeModalOnOverlay(e) {
+    if (e.target === document.getElementById('modal-overlay')) closeModal();
+  }
+
+  /* ── Modal : enregistrer (add ou edit) ──────────────────── */
+  async function saveTask() {
+    const taskId = document.getElementById('modal-task-id').value;
+    const title  = document.getElementById('f-title').value.trim();
+
+    if (!title) {
+      document.getElementById('f-title').focus();
+      showToast('⚠️ Le titre est requis');
+      return;
+    }
+
+    const payload = {
+      title,
+      description:   document.getElementById('f-description').value.trim(),
+      comment_faire: document.getElementById('f-comment-faire').value.trim(),
+      done_criteria: document.getElementById('f-done-criteria').value.trim(),
+      priority:      document.getElementById('f-priority').value,
+    };
+
+    try {
+      let res;
+      if (taskId) {
+        // Modification
+        res = await fetch('/tasks/' + taskId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        // Création
+        res = await fetch('/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      if (!res.ok) throw new Error('Erreur serveur');
+      closeModal();
+      // Recharger la page pour afficher les changements (simple et fiable)
+      window.location.reload();
+    } catch (e) {
+      showToast('❌ Erreur lors de l\'enregistrement');
+    }
+  }
+
+  /* ── Fermer modal avec Escape ───────────────────────────── */
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Enter' && document.getElementById('modal-overlay').classList.contains('open')) {
+      if (e.target.tagName !== 'TEXTAREA') saveTask();
+    }
+  });
+</script>
+
+</body>
+</html>
