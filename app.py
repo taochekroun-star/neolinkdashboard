@@ -1,5 +1,8 @@
-# app.py — Application Flask principale + démarrage du bot et du scheduler
+# app.py — Orchestrateur principal NeoLink Dashboard
+# Architecture: Bot Telegram + Scheduler dans le main thread (asyncio),
+#               Flask dans un thread daemon séparé.
 import os
+import signal
 import threading
 import asyncio
 import logging
@@ -9,25 +12,25 @@ from flask import Flask, render_template, request, jsonify
 import database as db
 import ai
 from bot import create_application
-from scheduler import create_scheduler, set_bot_app, set_bot_loop
+from scheduler import create_scheduler, set_bot_app
 
-# ─── Configuration du logging ──────────────────────────────────────────────────
+# ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ─── Initialisation Flask ──────────────────────────────────────────────────────
+# ─── Application Flask ─────────────────────────────────────────────────────────
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "neolinkstudio-fallback-key")
 
-# Initialisation de la base de données au démarrage
+# Initialisation de la base de données (sûr à appeler plusieurs fois)
 db.init_db()
 
 
 def _generate_tasks_if_empty():
-    """Génère les tâches initiales via l'API Anthropic si la DB est vide."""
+    """Génère 15 tâches initiales via Anthropic si la DB est vide."""
     if db.is_empty():
         logger.info("DB vide — génération des tâches initiales par l'IA...")
         tasks = ai.generate_initial_tasks()
@@ -42,30 +45,28 @@ def _generate_tasks_if_empty():
                 )
             logger.info(f"✅ {len(tasks)} tâches insérées en base")
         else:
-            logger.error("Aucune tâche générée par l'IA — vérifier ANTHROPIC_API_KEY")
+            logger.error("Aucune tâche générée — vérifier ANTHROPIC_API_KEY")
 
 
 # ─── Routes Flask ──────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    """Page principale du dashboard — affiche les tâches groupées par priorité."""
+    """Page principale — tâches groupées par priorité."""
     _generate_tasks_if_empty()
     tasks = db.get_all_tasks()
     stats = db.get_stats()
-
-    # Grouper les tâches par priorité
     grouped = {
-        "bloquant": [t for t in tasks if t["priority"] == "bloquant"],
+        "bloquant":      [t for t in tasks if t["priority"] == "bloquant"],
         "cette_semaine": [t for t in tasks if t["priority"] == "cette_semaine"],
-        "backlog": [t for t in tasks if t["priority"] == "backlog"],
+        "backlog":       [t for t in tasks if t["priority"] == "backlog"],
     }
     return render_template("index.html", grouped=grouped, stats=stats)
 
 
 @app.route("/ping")
 def ping():
-    """Route health check — utilisée pour le self-ping et la surveillance Render."""
+    """Health check — utilisé pour le self-ping Render."""
     return jsonify({"status": "ok", "service": "NeoLink Dashboard"}), 200
 
 
@@ -75,7 +76,6 @@ def add_task():
     data = request.get_json()
     if not data or not data.get("title", "").strip():
         return jsonify({"error": "Le titre est requis"}), 400
-
     task_id = db.insert_task(
         title=data["title"].strip(),
         description=data.get("description", "").strip(),
@@ -88,7 +88,7 @@ def add_task():
 
 @app.route("/tasks/<int:task_id>", methods=["GET"])
 def get_task(task_id):
-    """Retourne les données d'une tâche spécifique."""
+    """Retourne les données d'une tâche."""
     task = db.get_task_by_id(task_id)
     if not task:
         return jsonify({"error": "Tâche introuvable"}), 404
@@ -101,11 +101,9 @@ def update_task(task_id):
     data = request.get_json()
     if not data:
         return jsonify({"error": "Données manquantes"}), 400
-
     task = db.get_task_by_id(task_id)
     if not task:
         return jsonify({"error": "Tâche introuvable"}), 404
-
     db.update_task(
         task_id=task_id,
         title=data.get("title", task["title"]).strip(),
@@ -137,87 +135,86 @@ def toggle_task(task_id):
     return jsonify({"message": "Statut mis à jour", "status": task["status"]})
 
 
-# ─── Démarrage du Bot Telegram ─────────────────────────────────────────────────
+# ─── Flask dans un thread daemon ───────────────────────────────────────────────
 
-def _run_bot_in_thread(bot_app):
+def _run_flask():
+    """Lance le serveur Flask dans un thread daemon séparé."""
+    port = int(os.environ.get("PORT", 5000))
+    # use_reloader=False obligatoire : le reloader fork le process,
+    # ce qui casserait l'event loop asyncio du thread principal.
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+
+# ─── Point d'entrée asyncio principal ─────────────────────────────────────────
+
+async def main_async():
     """
-    Lance le bot Telegram dans son propre event loop asyncio.
-    Tourne dans un thread daemon séparé.
+    Coroutine principale. S'exécute dans le main thread avec asyncio.run().
+
+    Ordre de démarrage:
+    1. Génération des tâches initiales (synchrone, bloquant OK avant polling)
+    2. Flask dans un thread daemon
+    3. Bot Telegram initialisé et démarré (polling dans ce même event loop)
+    4. AsyncIOScheduler démarré (partage le même event loop)
+    5. Attente infinie jusqu'à signal d'arrêt
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Partager le loop avec le scheduler pour les envois cross-thread
-    set_bot_loop(loop)
-
-    try:
-        logger.info("Démarrage du bot Telegram (polling)...")
-        loop.run_until_complete(
-            bot_app.run_polling(
-                allowed_updates=["message"],
-                drop_pending_updates=True,
-            )
-        )
-    except Exception as e:
-        logger.error(f"Erreur fatale dans le thread bot: {e}")
-    finally:
-        loop.close()
-        logger.info("Thread bot Telegram terminé")
-
-
-# ─── Démarrage global (bot + scheduler) ───────────────────────────────────────
-
-_startup_done = False
-
-
-def startup():
-    """
-    Démarre le bot Telegram et le scheduler APScheduler.
-    Appelé une seule fois au lancement du processus.
-    """
-    global _startup_done
-    if _startup_done:
-        return
-    _startup_done = True
-
     logger.info("=== Démarrage NeoLink Dashboard ===")
 
-    # Générer les tâches si la DB est vide
+    # 1. Générer les tâches si la DB est vide (appel bloquant acceptable au démarrage)
     _generate_tasks_if_empty()
 
-    # Démarrer le bot Telegram dans un thread séparé
-    try:
-        bot_app = create_application()
-        set_bot_app(bot_app)
+    # 2. Flask dans un thread daemon
+    flask_thread = threading.Thread(target=_run_flask, daemon=True, name="FlaskThread")
+    flask_thread.start()
+    logger.info("Flask démarré dans un thread daemon")
 
-        bot_thread = threading.Thread(
-            target=_run_bot_in_thread,
-            args=(bot_app,),
-            daemon=True,
-            name="TelegramBotThread",
-        )
-        bot_thread.start()
-        logger.info("Thread bot Telegram lancé")
-    except Exception as e:
-        logger.error(f"Erreur démarrage bot Telegram: {e}")
+    # 3. Bot Telegram — initialisation et démarrage dans CE loop (main thread)
+    bot_app = create_application()
+    set_bot_app(bot_app)
 
-    # Démarrer le scheduler APScheduler
-    try:
-        scheduler = create_scheduler()
-        scheduler.start()
-        logger.info("Scheduler APScheduler démarré")
-    except Exception as e:
-        logger.error(f"Erreur démarrage scheduler: {e}")
+    await bot_app.initialize()
+    await bot_app.start()
+    await bot_app.updater.start_polling(
+        allowed_updates=["message"],
+        drop_pending_updates=True,
+    )
+    logger.info("Bot Telegram en polling (main thread)")
+
+    # 4. Scheduler AsyncIO — partage le même event loop que le bot
+    scheduler = create_scheduler()
+    scheduler.start()
+    logger.info("Scheduler AsyncIO démarré")
 
     logger.info("=== NeoLink Dashboard prêt ===")
 
+    # 5. Attendre le signal d'arrêt (SIGTERM sur Render, SIGINT en local)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
-# Lancer le démarrage dès l'importation du module (compatible gunicorn 1 worker)
-startup()
+    def _on_signal():
+        logger.info("Signal d'arrêt reçu")
+        stop_event.set()
 
+    # add_signal_handler fonctionne uniquement sur le main thread (Linux/macOS)
+    # Sur Windows, le KeyboardInterrupt sera capturé par le except ci-dessous
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _on_signal)
+        except (NotImplementedError, RuntimeError):
+            pass  # Windows ne supporte pas add_signal_handler
 
-# ─── Point d'entrée direct ─────────────────────────────────────────────────────
+    try:
+        await stop_event.wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
+        logger.info("Arrêt propre en cours...")
+        scheduler.shutdown(wait=False)
+        await bot_app.updater.stop()
+        await bot_app.stop()
+        await bot_app.shutdown()
+        logger.info("=== NeoLink Dashboard arrêté ===")
+
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    asyncio.run(main_async())

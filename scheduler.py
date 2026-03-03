@@ -1,10 +1,12 @@
-# scheduler.py — Jobs automatiques APScheduler pour NeoLinkStudio
+# scheduler.py — Jobs automatiques NeoLinkStudio (AsyncIOScheduler)
+# Tourne dans le même event loop asyncio que le bot Telegram (main thread).
 import os
 import asyncio
 import logging
+import functools
 import requests
-from datetime import datetime, date
-from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 
@@ -12,74 +14,52 @@ import database as db
 
 logger = logging.getLogger(__name__)
 
-# Timezone de Montréal
 MONTREAL_TZ = pytz.timezone("America/Montreal")
-
-# Variables globales pour la communication cross-thread
-_bot_app = None      # Référence à l'application Telegram
-_bot_loop = None     # Event loop du thread bot (pour asyncio.run_coroutine_threadsafe)
-
-# Garde-fou pour le message de re-engagement (1 seul par jour)
-_re_engagement_sent = {"date": None}
-
-# URL de l'application pour le self-ping (configurable via variable d'env)
-APP_URL = os.environ.get("APP_URL", "http://localhost:5000")
 TELEGRAM_USER_ID = int(os.environ.get("TELEGRAM_USER_ID", "0"))
+APP_URL = os.environ.get("APP_URL", "http://localhost:5000")
+
+# Référence à l'application Telegram (partagée depuis app.py via set_bot_app)
+_bot_app = None
+
+# Garde-fou re-engagement : un seul message par jour
+_re_engagement_sent = {"date": None}
 
 
 def set_bot_app(app):
-    """Définit l'application Telegram. Appelé depuis app.py au démarrage."""
+    """Définit l'application Telegram. Appelé depuis app.py après create_application()."""
     global _bot_app
     _bot_app = app
 
 
-def set_bot_loop(loop):
-    """Définit l'event loop du thread bot. Appelé depuis le thread bot."""
-    global _bot_loop
-    _bot_loop = loop
+# ─── Envoi de messages Telegram (async) ───────────────────────────────────────
 
-
-def _send_telegram_sync(text: str):
-    """
-    Envoie un message Telegram depuis un contexte synchrone (job APScheduler).
-    Utilise asyncio.run_coroutine_threadsafe pour envoyer dans le loop du bot.
-    """
-    if not _bot_app or not _bot_loop:
-        logger.warning("Bot non initialisé, impossible d'envoyer le message Telegram")
+async def _send_message(text: str):
+    """Envoie un message Telegram. S'exécute dans le main event loop."""
+    if not _bot_app:
+        logger.warning("_send_message: bot non initialisé")
         return
-
-    async def _send():
-        try:
-            await _bot_app.bot.send_message(
-                chat_id=TELEGRAM_USER_ID,
-                text=text,
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            logger.error(f"Erreur envoi message Telegram: {e}")
-
     try:
-        future = asyncio.run_coroutine_threadsafe(_send(), _bot_loop)
-        future.result(timeout=15)
+        await _bot_app.bot.send_message(
+            chat_id=TELEGRAM_USER_ID,
+            text=text,
+            parse_mode="Markdown",
+        )
     except Exception as e:
-        logger.error(f"Erreur run_coroutine_threadsafe: {e}")
+        logger.error(f"Erreur envoi message Telegram: {e}")
 
 
 # ─── Jobs planifiés ────────────────────────────────────────────────────────────
 
-def job_morning_briefing():
-    """
-    Briefing matinal: envoyé à 8h30 heure de Montréal.
-    Affiche les 3 prochaines tâches prioritaires.
-    """
+async def job_morning_briefing():
+    """Briefing matinal à 8h30 heure de Montréal — 3 prochaines tâches."""
     try:
         tasks = db.get_top_tasks(3)
         now_str = datetime.now(MONTREAL_TZ).strftime("%A %d %B")
 
         if not tasks:
-            _send_telegram_sync(
+            await _send_message(
                 f"☀️ *Bonjour Tao!* ({now_str})\n\n"
-                "Aucune tâche en attente. Ajoutes-en de nouvelles sur le dashboard! 🎉"
+                "Aucune tâche en attente. Ajoutes-en sur le dashboard! 🎉"
             )
             return
 
@@ -90,25 +70,30 @@ def job_morning_briefing():
             emoji = priority_emoji.get(task["priority"], "⚪")
             texte += f"{i}. {emoji} *{task['title']}*\n"
             if task.get("description"):
-                desc = task["description"][:80] + ("..." if len(task["description"]) > 80 else "")
+                desc = task["description"]
+                if len(desc) > 80:
+                    desc = desc[:77] + "..."
                 texte += f"   _{desc}_\n"
             texte += "\n"
 
         texte += "💪 Bonne journée! Tape /next pour commencer."
-        _send_telegram_sync(texte)
+        await _send_message(texte)
         logger.info("✅ Briefing matinal envoyé")
 
     except Exception as e:
         logger.error(f"Erreur job briefing matinal: {e}")
 
 
-def job_self_ping():
+async def job_self_ping():
     """
     Self-ping toutes les 10 minutes pour éviter la mise en veille sur Render.
-    Envoie une requête GET sur /ping.
+    requests.get est synchrone — on l'exécute dans un executor pour ne pas
+    bloquer l'event loop.
     """
     try:
-        response = requests.get(f"{APP_URL}/ping", timeout=10)
+        loop = asyncio.get_running_loop()
+        fn = functools.partial(requests.get, f"{APP_URL}/ping", timeout=10)
+        response = await loop.run_in_executor(None, fn)
         if response.status_code == 200:
             logger.debug("Self-ping OK")
         else:
@@ -119,43 +104,39 @@ def job_self_ping():
         logger.debug(f"Self-ping: {e}")
 
 
-def job_check_re_engagement():
+async def job_check_re_engagement():
     """
     Vérifie si Tao est inactif depuis plus de 3h entre 10h et 17h.
-    Envoie UN seul message de re-engagement par jour si nécessaire.
+    Envoie UN seul message de re-engagement par jour.
     """
     try:
         now = datetime.now(MONTREAL_TZ)
         today = now.date()
 
-        # Vérifier seulement entre 10h et 17h
+        # Uniquement entre 10h et 17h
         if not (10 <= now.hour < 17):
             return
 
-        # Un seul message de re-engagement par jour
+        # Un seul message par jour
         if _re_engagement_sent["date"] == today:
             return
 
         last_completion_str = db.get_last_completion_time()
-
         should_send = False
         hours_inactive = 0
 
         if last_completion_str is None:
-            # Aucune tâche complétée aujourd'hui — envoyer si on est après 13h (10h + 3h)
+            # Aucune tâche complétée aujourd'hui — envoyer si on dépasse 13h (10h + 3h)
             if now.hour >= 13:
                 should_send = True
                 hours_inactive = now.hour - 10
         else:
-            # Calculer le temps écoulé depuis la dernière complétion
             try:
                 last_dt = datetime.fromisoformat(last_completion_str)
-                # Assurer que la date est timezone-aware
                 if last_dt.tzinfo is None:
                     last_dt = MONTREAL_TZ.localize(last_dt)
                 else:
                     last_dt = last_dt.astimezone(MONTREAL_TZ)
-
                 hours_inactive = (now - last_dt).total_seconds() / 3600
                 if hours_inactive >= 3:
                     should_send = True
@@ -175,7 +156,7 @@ def job_check_re_engagement():
                     "⚡ *Hé Tao!* Aucune tâche complétée depuis ce matin.\n\n"
                     "Lance-toi sur la prochaine priorité. Tape /next! 💪"
                 )
-            _send_telegram_sync(msg)
+            await _send_message(msg)
             logger.info("✅ Message de re-engagement envoyé")
 
     except Exception as e:
@@ -184,23 +165,24 @@ def job_check_re_engagement():
 
 # ─── Création du scheduler ─────────────────────────────────────────────────────
 
-def create_scheduler() -> BackgroundScheduler:
+def create_scheduler() -> AsyncIOScheduler:
     """
-    Crée et configure le scheduler APScheduler avec tous les jobs.
-    Le scheduler est retourné mais PAS démarré (appelé depuis app.py).
+    Crée et configure l'AsyncIOScheduler avec les 3 jobs.
+    Doit être appelé depuis un contexte asyncio (main thread) afin que
+    le scheduler partage automatiquement le bon event loop.
     """
-    scheduler = BackgroundScheduler(timezone=MONTREAL_TZ)
+    scheduler = AsyncIOScheduler(timezone=MONTREAL_TZ)
 
-    # Job 1: Briefing matinal à 8h30 heure de Montréal
+    # Job 1 : Briefing matinal à 8h30
     scheduler.add_job(
         job_morning_briefing,
         CronTrigger(hour=8, minute=30, timezone=MONTREAL_TZ),
         id="morning_briefing",
-        name="Briefing matinal NeoLinkStudio",
+        name="Briefing matinal",
         replace_existing=True,
     )
 
-    # Job 2: Self-ping toutes les 10 minutes pour Render
+    # Job 2 : Self-ping toutes les 10 minutes
     scheduler.add_job(
         job_self_ping,
         "interval",
@@ -210,7 +192,7 @@ def create_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
-    # Job 3: Vérification re-engagement toutes les 30 minutes entre 10h et 17h
+    # Job 3 : Vérification re-engagement toutes les 30 min entre 10h et 17h
     scheduler.add_job(
         job_check_re_engagement,
         CronTrigger(hour="10-16", minute="0,30", timezone=MONTREAL_TZ),
@@ -219,5 +201,5 @@ def create_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
 
-    logger.info("Scheduler APScheduler configuré (3 jobs)")
+    logger.info("AsyncIOScheduler configuré (3 jobs)")
     return scheduler
