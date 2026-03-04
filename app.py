@@ -152,21 +152,31 @@ async def main_async():
     Coroutine principale. S'exécute dans le main thread avec asyncio.run().
 
     Ordre de démarrage:
-    1. Génération des tâches initiales (synchrone, bloquant OK avant polling)
-    2. Flask dans un thread daemon
+    1. Flask dans un thread daemon (bind sur PORT immédiatement — évite timeout Render)
+    2. Génération des tâches initiales dans un thread séparé avec délai de 3s
     3. Bot Telegram initialisé et démarré (polling dans ce même event loop)
     4. AsyncIOScheduler démarré (partage le même event loop)
     5. Attente infinie jusqu'à signal d'arrêt
     """
     logger.info("=== Démarrage NeoLink Dashboard ===")
 
-    # 1. Générer les tâches si la DB est vide (appel bloquant acceptable au démarrage)
-    _generate_tasks_if_empty()
-
-    # 2. Flask dans un thread daemon
+    # 1. Flask en premier — bind sur PORT immédiatement pour satisfaire Render
     flask_thread = threading.Thread(target=_run_flask, daemon=True, name="FlaskThread")
     flask_thread.start()
     logger.info("Flask démarré dans un thread daemon")
+
+    # 2. Génération différée des tâches initiales — après que Flask est prêt,
+    #    pour ne pas bloquer le bind sur PORT et éviter le timeout Render.
+    def _delayed_task_init():
+        import time
+        time.sleep(3)
+        _generate_tasks_if_empty()
+
+    task_init_thread = threading.Thread(
+        target=_delayed_task_init, daemon=True, name="TaskInitThread"
+    )
+    task_init_thread.start()
+    logger.info("Génération des tâches initiales planifiée (délai 3s)")
 
     # 3. Bot Telegram — initialisation et démarrage dans CE loop (main thread)
     bot_app = create_application()
