@@ -46,7 +46,8 @@ Dans l'onglet **Environment** du service Render, ajouter les variables suivantes
 | `TELEGRAM_USER_ID` | Ton ID Telegram (obtenu via @userinfobot) |
 | `ANTHROPIC_API_KEY` | Clé API Anthropic (console.anthropic.com) |
 | `SECRET_KEY` | Clé secrète Flask pour les sessions (chaîne aléatoire) |
-| `APP_URL` | URL publique Render, ex: `https://neolinkdashboard.onrender.com` |
+| `RENDER_URL` | URL publique Render, ex: `https://neolinkdashboard.onrender.com` — utilisée pour enregistrer le webhook Telegram |
+| `APP_URL` | Identique à `RENDER_URL` — utilisé par le scheduler pour le self-ping |
 | `PORT` | **Ne pas définir** — Render le fournit automatiquement |
 
 ### 4. Configurer APP_URL
