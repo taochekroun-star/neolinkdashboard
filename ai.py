@@ -25,43 +25,43 @@ def _get_client():
 
 def generate_initial_tasks():
     """
-    Génère 15 tâches initiales pertinentes pour NeoLinkStudio via l'API Anthropic.
+    Génère 5 tâches initiales pertinentes pour NeoLinkStudio via l'API Anthropic.
+    Limité à 5 tâches pour rester dans les limites du free tier (8000 tokens/min).
     Retourne une liste de dicts ou une liste vide en cas d'erreur.
     """
     try:
         client = _get_client()
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=4096,
+            max_tokens=1200,
             messages=[{
                 "role": "user",
-                "content": """Génère exactement 15 tâches concrètes et actionnables pour Tao, fondateur de NeoLinkStudio.
+                "content": """Génère exactement 5 tâches concrètes pour Tao, fondateur de NeoLinkStudio.
 
 Contexte:
 - Tao a 15 ans, vit à Québec, Canada
 - Il vend des systèmes d'automatisation IA pour les PME HVAC locales
 - Objectif IMMÉDIAT: obtenir son PREMIER client test gratuitement en échange d'un témoignage vidéo
 - Stack: n8n (Railway), Airtable, Tally, Calendly, OpenAI/Claude
-- Il doit prospecter, créer une démo, pitcher, closer
 
 Répartition OBLIGATOIRE:
-- 5 tâches priorité "bloquant" (bloquent tout le reste, à faire MAINTENANT)
-- 5 tâches priorité "cette_semaine" (importantes cette semaine)
-- 5 tâches priorité "backlog" (à faire plus tard)
+- 2 tâches priorité "bloquant"
+- 2 tâches priorité "cette_semaine"
+- 1 tâche priorité "backlog"
 
 Réponds UNIQUEMENT avec un tableau JSON valide, sans texte avant ou après:
 [
   {
     "title": "Titre court et actionnable (max 60 chars)",
-    "description": "Ce qu'il faut faire et pourquoi c'est important",
-    "comment_faire": "Étapes concrètes pour accomplir la tâche",
-    "done_criteria": "Comment savoir que c'est vraiment terminé",
+    "description": "1-2 phrases max. Ce qu'il faut faire et pourquoi.",
+    "comment_faire": "1-2 phrases max. Étapes concrètes pour accomplir la tâche.",
+    "done_criteria": "1 phrase max. Comment savoir que c'est terminé.",
     "priority": "bloquant"
   }
 ]
 
 Valeurs valides pour priority: "bloquant", "cette_semaine", "backlog"
-Les tâches doivent être ultra-concrètes: pas de "réfléchir à", mais "créer X", "envoyer Y à Z", "configurer A"."""
+Sois ultra-concis: chaque champ texte = 1 à 2 phrases maximum."""
             }]
         )
 
@@ -75,7 +75,7 @@ Les tâches doivent être ultra-concrètes: pas de "réfléchir à", mais "crée
             return []
 
         tasks = json.loads(content[start:end])
-        logger.info(f"✅ {len(tasks)} tâches générées par l'IA")
+        logger.info(f"✅ {len(tasks)} tâches initiales générées par l'IA")
         return tasks
 
     except json.JSONDecodeError as e:
