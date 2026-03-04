@@ -135,6 +135,27 @@ def toggle_task(task_id):
     return jsonify({"message": "Statut mis à jour", "status": task["status"]})
 
 
+@app.route("/admin/reset-tasks")
+def admin_reset_tasks():
+    """Supprime toutes les tâches et en régénère 5 via l'API Anthropic."""
+    # Supprimer toutes les tâches existantes
+    for task in db.get_all_tasks():
+        db.delete_task(task["id"])
+
+    # Régénérer les tâches initiales
+    tasks = ai.generate_initial_tasks()
+    for task in tasks:
+        db.insert_task(
+            title=task.get("title", "Tâche sans titre"),
+            description=task.get("description", ""),
+            comment_faire=task.get("comment_faire", ""),
+            done_criteria=task.get("done_criteria", ""),
+            priority=task.get("priority", "backlog"),
+        )
+
+    return jsonify({"tasks_created": len(tasks)})
+
+
 # ─── Flask dans un thread daemon ───────────────────────────────────────────────
 
 def _run_flask():
